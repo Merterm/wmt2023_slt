@@ -226,9 +226,12 @@ class Sign2TextTransformerEncoder(FairseqEncoder):
             self.layer_norm = None
 
     def forward(self, src_tokens, encoder_padding_mask, return_all_hiddens=False):
+        # print("feats type", self.feats_type)
         if self.feats_type == SignFeatsType.mediapipe: #This error keeps appearing: raise AttributeError(name) from None
             src_tokens = src_tokens.view(src_tokens.shape[0], src_tokens.shape[1], -1)
+            # print("Inside the if in forward", src_tokens.shape)
         #src_tokens B x seq_len x Fs
+        # print("Inside the forward", src_tokens.shape)
         x = self.feat_proj(src_tokens).transpose(0, 1) #[seq_len, batch_size, embed_dim]
         # x: seq_len x B x H
         x = self.embed_scale * x

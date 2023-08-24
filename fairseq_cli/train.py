@@ -514,6 +514,9 @@ def validate(
 
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
 
+        print(cfg.checkpoint.best_checkpoint_metric)
+        print(stats)
+
         valid_losses.append(stats[cfg.checkpoint.best_checkpoint_metric])
     return valid_losses
 

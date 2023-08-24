@@ -117,6 +117,7 @@ ENV/
 
 # data
 data-bin/
+wmt_slt23/
 
 # reranking
 /examples/reranking/rerank_data

@@ -37,11 +37,13 @@ def main():
         tsv_file = Path(tsv_file).expanduser().resolve()
         df = pd.read_csv(tsv_file, sep='\t')
         sentences.extend(df[args.column].to_list())
+        # print(sentences)
 
     with NamedTemporaryFile(mode="w") as f:
         for sent in sentences:
             if args.lowercase:
                 sent = sent.lower()
+            print(sent)
             f.write(sent + "\n")
 
         gen_vocab(

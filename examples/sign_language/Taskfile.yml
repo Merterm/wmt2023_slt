@@ -601,6 +601,242 @@ tasks:
       - "{{.DATA_DIR}}/srfmonolingual.unigram{{.VOCAB_SIZE}}.txt"
       - "{{.DATA_DIR}}/srfmonolingual.unigram{{.VOCAB_SIZE}}.vocab"
 
+  wmt-slt23:test:download:
+    desc: Download the WMT-SLT 23 test set.
+    preconditions:
+      - sh: "[[ -d {{.WMTSLT23_DIR}} ]]"
+        msg: Specify an existing WMTSLT23_DIR in the .env file.
+    vars:
+      NUM_CONNECTIONS: 32
+    cmds:
+      - cmd: axel -a -n {{.NUM_CONNECTIONS}}
+              --output={{.WMTSLT23_DIR}}/test_sources.v2.0.tar.gz
+              https://files.ifi.uzh.ch/cl/archiv/2023/easier/wmtslt/test_sources.v2.0.tar.gz
+    status:
+      - test $(stat -c %s {{.WMTSLT23_DIR}}/test_sources.v2.0.tar.gz) -eq 596366187
+    generates:
+      - "{{.WMTSLT23_DIR}}/test_sources.v2.0.tar.gz"
+
+  wmt-slt23:test:extract:
+    desc: Extract the WMT-SLT 23 test set from the tar.gz after download.
+    preconditions:
+      - sh: test $(stat -c %s {{.WMTSLT23_DIR}}/test_sources.v2.0.tar.gz) -eq 596366187
+        msg: The zip file does not exist or is not correct, redownload it ({{.WMTSLT23_DIR}}/test_sources.v2.0.tar.gz).
+    cmds:
+      - cmd: pv {{.WMTSLT23_DIR}}/test_sources.v2.0.tar.gz | tar -x -I pigz -C {{.WMTSLT23_DIR}}
+    status:
+      - test $(find {{.WMTSLT23_DIR}}/test/dsgs-de/videos/ -name "*.mp4" -type f | wc -l) -eq 250
+    generates:
+      - "{{.WMTSLT23_DIR}}/test/"
+
+  wmt-slt23:test:extract_mediapipe:
+    desc: Extract MediaPipe poses from the WMT-SLT 23 test set.
+    preconditions:
+      - sh: test $(find {{.WMTSLT23_DIR}}/test/dsgs-de/videos/ -name "*.mp4" -type f | wc -l) -eq 250
+        msg: The test directory does not exist or is incomplete.
+    vars:
+      NUM_JOBS: 16
+      FPS: 25
+    cmds:
+      - cmd: |
+              if [[ ! -d {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe_original ]]; then
+                mv {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe_original
+              fi
+        silent: True
+      - cmd: |
+              if [[ -d {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe ]]; then
+                rm -r {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe
+              fi
+        silent: True
+      - cmd: find {{.WMTSLT23_DIR}}/test/dsgs-de/videos/ -name "*.mp4" -type f |
+             parallel -j {{.NUM_JOBS}} --bar \
+             'id=$(basename {} .mp4);
+             pose_file="{{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/${id}.pose";
+             python ./scripts/extract_mediapipe.py --video-file {} --poses-file ${pose_file} --fps {{.FPS}} 2> /dev/null'
+    status:
+      - test $(find {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/ -name "*.pose" -type f | wc -l) -eq 250
+    generates:
+      - "{{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/*.pose"
+
+  wmt-slt23:test:convert_out_2_txt:
+    desc: Convert the out file stats to txt file with detokenized hypotheses line by line for WMTSLT23.
+    preconditions:
+      - sh: "[[ -d {{.WMTSLT23_DIR}} ]]"
+        msg: Specify an existing WMTSLT23_DIR in the .env file.
+      - sh: "[[ {{.SAVE_DIR}} ]]"
+        msg: Specify the SAVE_DIR in the .env file
+      - sh: '[ "{{.EXPERIMENT}}" ]'
+        msg: Specify a name for the EXPERIMENT in the .env file
+      - sh: '[ "{{.CKPT}}" ]'
+        msg: Specify a CKPT in the .env file
+    vars:
+      CKPT_FILE:
+        sh: echo {{.SAVE_DIR}}/{{.EXPERIMENT}}/ckpts/{{.CKPT}}
+      OUT_FILE:
+        sh: tmp={{.CKPT_FILE}}; echo "{{.SAVE_DIR}}/{{.EXPERIMENT}}/generates/{{.SUBSET}}/$(basename ${tmp::-3}).out"
+      TXT_FILE:
+        sh: tmp={{.CKPT_FILE}}; echo "{{.SAVE_DIR}}/{{.EXPERIMENT}}/generates/{{.SUBSET}}/$(basename ${tmp::-3}).txt"
+    cmds:
+      - cmd: awk -F '\t' 'BEGIN { for (i=0; i<=245; i++) { lines["D-" i] = "null" } } $1 ~ /^D-/ { lines[$1] = $3 } END { for (key in lines) { print lines[key] } }' {{.OUT_FILE}} > {{.TXT_FILE}}
+    generates:
+      - "{{.TXT_FILE}}"
+
+  wmt-slt23:test:generate_xml:
+    desc: Generate the WMT-SLT 23 test set XML to upload to OCELoT.
+    preconditions:
+      - sh: "[[ -d {{.WMTSLT23_DIR}} ]]"
+        msg: Specify an existing WMTSLT23_DIR in the .env file.
+      - sh: "[[ {{.SAVE_DIR}} ]]"
+        msg: Specify the SAVE_DIR in the .env file
+      - sh: '[ "{{.EXPERIMENT}}" ]'
+        msg: Specify a name for the EXPERIMENT in the .env file
+      - sh: '[ "{{.CKPT}}" ]'
+        msg: Specify a CKPT in the .env file
+    vars:
+      CKPT_FILE:
+          sh: echo {{.SAVE_DIR}}/{{.EXPERIMENT}}/ckpts/{{.CKPT}}
+      TXT_FILE:
+        sh: tmp={{.CKPT_FILE}}; echo "{{.SAVE_DIR}}/{{.EXPERIMENT}}/generates/{{.SUBSET}}/$(basename ${tmp::-3}).txt"
+    cmds:
+      - cmd: wmt-wrap -s {{.WMTSLT23_DIR}}/slttest2023.dsgs-de_srf.sources.xml -t {{.TXT_FILE}} -n baseline_signsuisse -l de > {{.WMTSLT23_DIR}}/slttest2023.dsgs-de_srf.hypo.de.xml
+    status:
+      - test $(stat -c %s {{.WMTSLT23_DIR}}/slttest2023.dsgs-de_srf.hypo.de.xml) -eq 596366187
+    generates:
+      - "{{.WMTSLT23_DIR}}/slttest2023.dsgs-de.hypo.de.xml"
+
+  wmt-slt23:generate_tsv:
+    desc: Generate TSV files for the WMT-SLT 23 datasets.
+    preconditions:
+      - sh: "[[ -d {{.FAIRSEQ_ROOT}} ]]"
+        msg: Specify the FAIRSEQ_ROOT in the .env file.
+      - sh: "[ ! -z {{.DATA_DIR}} ]"
+        msg: Specify the DATA_DIR in the .env file.
+      - sh: test $(find {{.DATA_DIR}}/signsuisse/example_mediapipe/ -name "*.pose" -type f | wc -l) -eq 17205
+        msg: Mediapipe features for signsuisse have not been generated yet or are incomplete. Run the extraction.
+      - sh: test $(find {{.DATA_DIR}}/srf/monolingual/mediapipe/ -name "*.pose" -type f | wc -l) -eq 37
+        msg: Mediapipe features for SRF have not been generated yet or are incomplete. Run the extraction.
+      # - sh: test $(find {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/ -name "*.pose" -type f | wc -l) -eq 250
+      #   msg: Mediapipe features for test have not been generated yet or are incomplete. Run the extraction.
+      # - sh: test $(find {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/ -name "*.pose" -type f | wc -l) -eq 246
+      #   msg: Mediapipe features for test have not been generated yet or are incomplete. Run the extraction.
+    cmds:
+      # - cmd: |
+      #         PYTHONPATH=$PYTHONPATH:{{.FAIRSEQ_ROOT}} \
+      #         python {{.FAIRSEQ_ROOT}}/examples/sign_language/scripts/generate_tsv.py \
+      #           --dataset wmt_slt23 \
+      #           --path {{.DATA_DIR}} \
+      #           --tsv-out {{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisse.tsv \
+      #           --type mediapipe \
+      #           --split signsuisse \
+      #           --signs-lang dsgs \
+      #           --translation-lang de
+      # - cmd: |
+      #         PYTHONPATH=$PYTHONPATH:{{.FAIRSEQ_ROOT}} \
+      #         python {{.FAIRSEQ_ROOT}}/examples/sign_language/scripts/generate_tsv.py \
+      #           --dataset wmt_slt23 \
+      #           --path {{.DATA_DIR}} \
+      #           --tsv-out {{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisseandsrf.tsv \
+      #           --type mediapipe \
+      #           --split signsuisse srf_monolingual \
+      #           --signs-lang dsgs \
+      #           --translation-lang de
+      # - cmd: |
+      #         PYTHONPATH=$PYTHONPATH:{{.FAIRSEQ_ROOT}} \
+      #         python {{.FAIRSEQ_ROOT}}/examples/sign_language/scripts/generate_tsv.py \
+      #           --dataset wmt_slt23 \
+      #           --path {{.DATA_DIR}}  \
+      #           --tsv-out {{.DATA_DIR}}/wmtslt23.mediapipe.train_srfmonolingual.tsv \
+      #           --split srf_monolingual \
+      #           --translation-lang de
+      # - cmd: |
+      #         PYTHONPATH=$PYTHONPATH:{{.FAIRSEQ_ROOT}} \
+      #         python {{.FAIRSEQ_ROOT}}/examples/sign_language/scripts/generate_tsv.py \
+      #           --dataset wmt_slt23 \
+      #           --path {{.DATA_DIR}}  \
+      #           --tsv-out {{.DATA_DIR}}/wmtslt23.mediapipe.test_dsgs-de.tsv \
+      #           --type mediapipe \
+      #           --split test_dsgs-de \
+      #           --signs-lang dsgs
+      - cmd: |
+              PYTHONPATH=$PYTHONPATH:{{.FAIRSEQ_ROOT}} \
+              python {{.FAIRSEQ_ROOT}}/examples/sign_language/scripts/generate_tsv.py \
+                --dataset wmt_slt23 \
+                --path {{.DATA_DIR}}  \
+                --tsv-out {{.DATA_DIR}}/wmtslt23.mediapipe.test_dsgs-de_srf.tsv \
+                --type mediapipe \
+                --split test_dsgs-de \
+                --signs-lang dsgs
+    status:
+      # - test $(md5sum {{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisse.tsv | cut -d ' ' -f 1) = "512b340cd73fcc723cf917452bd2abc2"
+      # - test $(md5sum {{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisseandsrf.tsv | cut -d ' ' -f 1) = "1a52cf51252936514deee943934ad10a"
+      # - test $(md5sum {{.DATA_DIR}}/wmtslt23.mediapipe.train_srfmonolingual.tsv | cut -d ' ' -f 1) = "2ed88554bb111625af157a736a7f2e65"
+      # - test $(md5sum {{.DATA_DIR}}/wmtslt23.mediapipe.test_dsgs-de.tsv | cut -d ' ' -f 1) = "5f4c436c1c2324fed79cd0e052e65f3a"
+      - test $(md5sum {{.DATA_DIR}}/wmtslt23.mediapipe.test_dsgs-de_srf.tsv | cut -d ' ' -f 1) = "5f4c436c1c2324fed79cd0e052e65f3a"s
+    generates:
+      # - "{{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisse.tsv"
+      # - "{{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisseandsrf.tsv"
+      # - "{{.DATA_DIR}}/wmtslt23.mediapipe.train_srfmonolingual.tsv"
+      # - "{{.DATA_DIR}}/wmtslt23.mediapipe.test_dsgs-de.tsv"
+      - "{{.DATA_DIR}}/wmtslt23.mediapipe.test_dsgs-de_srf.tsv"
+
+  wmt-slt23:train_sentencepiece:
+    desc: Train SentencePiece models for the WMT-SLT 23 datasets.
+    preconditions:
+      - sh: "[[ -d {{.FAIRSEQ_ROOT}} ]]"
+        msg: Specify the FAIRSEQ_ROOT in the .env file.
+      - sh: "[ ! -z {{.DATA_DIR}} ]"
+        msg: Specify the DATA_DIR in the .env file.
+      - sh: "[ ! -z {{.VOCAB_SIZE}} ]"
+        msg: Specify a VOCAB_SIZE.
+      # - sh: |
+      #       test $(md5sum {{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisse.tsv | cut -d ' ' -f 1) = "512b340cd73fcc723cf917452bd2abc2"
+      #   msg: TSV files have not been generated yet or are incomplete. Prepare them before running this.
+      # - sh: |
+      #       test $(md5sum {{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisseandsrf.tsv | cut -d ' ' -f 1) = "1a52cf51252936514deee943934ad10a"
+      #   msg: TSV files have not been generated yet or are incomplete. Prepare them before running this.
+      # - sh: |
+      #       test $(md5sum {{.DATA_DIR}}/wmtslt23.train_srfmonolingual.tsv | cut -d ' ' -f 1) = "595939650db23b20bd507927407266d2"
+      #   msg: TSV files have not been generated yet or are incomplete. Prepare them before running this.
+    cmds:
+      # - cmd: |
+      #         PYTHONPATH=$PYTHONPATH:{{.FAIRSEQ_ROOT}} \
+      #         python {{.FAIRSEQ_ROOT}}/examples/sign_language/scripts/train_spm.py \
+      #           --tsv-file {{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisse.tsv \
+      #           --spm-prefix {{.DATA_DIR}}/wmtslt23.signsuisse.unigram{{.VOCAB_SIZE}} \
+      #           --vocab-size {{.VOCAB_SIZE}} \
+      #           --vocab-type unigram
+      # - cmd: |
+      #         PYTHONPATH=$PYTHONPATH:{{.FAIRSEQ_ROOT}} \
+      #         python {{.FAIRSEQ_ROOT}}/examples/sign_language/scripts/train_spm.py \
+      #           --tsv-file {{.DATA_DIR}}/wmtslt23.mediapipe.train_signsuisseandsrf.tsv \
+      #           --spm-prefix {{.DATA_DIR}}/wmtslt23.signsuisseandsrf.unigram{{.VOCAB_SIZE}} \
+      #           --vocab-size {{.VOCAB_SIZE}} \
+      #           --vocab-type unigram
+      - cmd: |
+              PYTHONPATH=$PYTHONPATH:{{.FAIRSEQ_ROOT}} \
+              python {{.FAIRSEQ_ROOT}}/examples/sign_language/scripts/train_spm.py \
+                --tsv-file {{.DATA_DIR}}/wmtslt23.train_srfmonolingual.tsv \
+                --spm-prefix {{.DATA_DIR}}/wmtslt23.srfmonolingual.unigram{{.VOCAB_SIZE}} \
+                --vocab-size {{.VOCAB_SIZE}} \
+                --vocab-type unigram
+    status:
+      # - test $(cat {{.DATA_DIR}}/wmtslt23.signsuisse.unigram{{.VOCAB_SIZE}}.vocab | wc -l) -eq {{.VOCAB_SIZE}}
+      # - test $(cat {{.DATA_DIR}}/wmtslt23.signsuisse.unigram{{.VOCAB_SIZE}}.txt | wc -l) -eq $(({{.VOCAB_SIZE}}-4))
+      # - test $(cat {{.DATA_DIR}}/wmtslt23.signsuisseandsrf.unigram{{.VOCAB_SIZE}}.vocab | wc -l) -eq {{.VOCAB_SIZE}}
+      # - test $(cat {{.DATA_DIR}}/wmtslt23.signsuisseandsrf.unigram{{.VOCAB_SIZE}}.txt | wc -l) -eq $(({{.VOCAB_SIZE}}-4))
+      - test $(cat {{.DATA_DIR}}/wmtslt23.srfmonolingual.unigram{{.VOCAB_SIZE}}.vocab | wc -l) -eq {{.VOCAB_SIZE}}
+      - test $(cat {{.DATA_DIR}}/wmtslt23.srfmonolingual.unigram{{.VOCAB_SIZE}}.txt | wc -l) -eq $(({{.VOCAB_SIZE}}-4))
+    generates:
+      # - "{{.DATA_DIR}}/signsuisse.unigram{{.VOCAB_SIZE}}.model"
+      # - "{{.DATA_DIR}}/signsuisse.unigram{{.VOCAB_SIZE}}.txt"
+      # - "{{.DATA_DIR}}/signsuisse.unigram{{.VOCAB_SIZE}}.vocab"
+      # - "{{.DATA_DIR}}/signsuisseandsrf.unigram{{.VOCAB_SIZE}}.model"
+      # - "{{.DATA_DIR}}/signsuisseandsrf.unigram{{.VOCAB_SIZE}}.txt"
+      # - "{{.DATA_DIR}}/signsuisseandsrf.unigram{{.VOCAB_SIZE}}.vocab"
+      - "{{.DATA_DIR}}/srfmonolingual.unigram{{.VOCAB_SIZE}}.model"
+      - "{{.DATA_DIR}}/srfmonolingual.unigram{{.VOCAB_SIZE}}.txt"
+      - "{{.DATA_DIR}}/srfmonolingual.unigram{{.VOCAB_SIZE}}.vocab"
+
   egosign:val:front:extract_mediapipe:
     desc: Extract MediaPipe poses from the EgoSign dataset, front view. (In calcula, EGOSIGN_DIR = /mnt/gpid08/datasets/How2Sign/EgoSign)
     preconditions:
@@ -1103,7 +1339,7 @@ tasks:
 
       - cmd: |
               mkdir -p $(dirname "{{.OUT_FILE}}")
-              fairseq-generate {{.I3D_DIR}} \
+              fairseq-generate {{.DATA_DIR}} \
               --path {{.CKPT_FILE}} \
               --task sign_to_text \
               --gen-subset {{.SUBSET}} \
