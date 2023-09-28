@@ -632,31 +632,60 @@ tasks:
   wmt-slt23:test:extract_mediapipe:
     desc: Extract MediaPipe poses from the WMT-SLT 23 test set.
     preconditions:
-      - sh: test $(find {{.WMTSLT23_DIR}}/test/dsgs-de/videos/ -name "*.mp4" -type f | wc -l) -eq 250
+      - sh: test $(find {{.DATA_DIR}}/test/dsgs-de/videos/ -name "*.mp4" -type f | wc -l) -eq 250
         msg: The test directory does not exist or is incomplete.
     vars:
       NUM_JOBS: 16
       FPS: 25
     cmds:
       - cmd: |
-              if [[ ! -d {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe_original ]]; then
-                mv {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe_original
+              if [[ ! -d {{.DATA_DIR}}/test/dsgs-de/mediapipe_original ]]; then
+                mv {{.DATA_DIR}}/test/dsgs-de/mediapipe {{.DATA_DIR}}/test/dsgs-de/mediapipe_original
               fi
         silent: True
       - cmd: |
-              if [[ -d {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe ]]; then
-                rm -r {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe
+              if [[ -d {{.DATA_DIR}}/test/dsgs-de/mediapipe ]]; then
+                rm -r {{.DATA_DIR}}/test/dsgs-de/mediapipe
               fi
         silent: True
-      - cmd: find {{.WMTSLT23_DIR}}/test/dsgs-de/videos/ -name "*.mp4" -type f |
+      - cmd: find {{.DATA_DIR}}/test/dsgs-de/videos/ -name "*.mp4" -type f |
              parallel -j {{.NUM_JOBS}} --bar \
              'id=$(basename {} .mp4);
-             pose_file="{{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/${id}.pose";
+             pose_file="{{.DATA_DIR}}/test/dsgs-de/mediapipe/${id}.pose";
              python ./scripts/extract_mediapipe.py --video-file {} --poses-file ${pose_file} --fps {{.FPS}} 2> /dev/null'
     status:
-      - test $(find {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/ -name "*.pose" -type f | wc -l) -eq 250
+      - test $(find {{.DATA_DIR}}/test/dsgs-de/mediapipe/ -name "*.pose" -type f | wc -l) -eq 250
     generates:
-      - "{{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/*.pose"
+      - "{{.DATA_DIR}}/test/dsgs-de/mediapipe/*.pose"
+
+  wmt-slt23:test:extract_mediapipe_srf:
+    desc: Extract MediaPipe poses from the WMT-SLT 23 test set.
+    preconditions:
+      - sh: test $(find {{.DATA_DIR}}/test/dsgs-de/videos/ -name "*.mp4" -type f | wc -l) -eq 246
+        msg: The test directory does not exist or is incomplete.
+    vars:
+      NUM_JOBS: 16
+      FPS: 25
+    cmds:
+      - cmd: |
+              if [[ ! -d {{.DATA_DIR}}/test/dsgs-de/mediapipe_original ]]; then
+                mv {{.DATA_DIR}}/test/dsgs-de/mediapipe {{.DATA_DIR}}/test/dsgs-de/mediapipe_original
+              fi
+        silent: True
+      - cmd: |
+              if [[ -d {{.DATA_DIR}}/test/dsgs-de/mediapipe ]]; then
+                rm -r {{.DATA_DIR}}/test/dsgs-de/mediapipe
+              fi
+        silent: True
+      - cmd: find {{.DATA_DIR}}/test/dsgs-de/videos/ -name "*.mp4" -type f |
+             parallel -j {{.NUM_JOBS}} --bar \
+             'id=$(basename {} .mp4);
+             pose_file="{{.DATA_DIR}}/test/dsgs-de/mediapipe/${id}.pose";
+             python ./scripts/extract_mediapipe_srf.py --video-file {} --poses-file ${pose_file} --fps {{.FPS}} 2> /dev/null'
+    status:
+      - test $(find {{.DATA_DIR}}/test/dsgs-de/mediapipe/ -name "*.pose" -type f | wc -l) -eq 246
+    generates:
+      - "{{.DATA_DIR}}/test/dsgs-de/mediapipe/*.pose"
 
   wmt-slt23:test:convert_out_2_txt:
     desc: Convert the out file stats to txt file with detokenized hypotheses line by line for WMTSLT23.
@@ -711,14 +740,14 @@ tasks:
         msg: Specify the FAIRSEQ_ROOT in the .env file.
       - sh: "[ ! -z {{.DATA_DIR}} ]"
         msg: Specify the DATA_DIR in the .env file.
-      - sh: test $(find {{.DATA_DIR}}/signsuisse/example_mediapipe/ -name "*.pose" -type f | wc -l) -eq 17205
-        msg: Mediapipe features for signsuisse have not been generated yet or are incomplete. Run the extraction.
-      - sh: test $(find {{.DATA_DIR}}/srf/monolingual/mediapipe/ -name "*.pose" -type f | wc -l) -eq 37
-        msg: Mediapipe features for SRF have not been generated yet or are incomplete. Run the extraction.
+      # - sh: test $(find {{.DATA_DIR}}/signsuisse/example_mediapipe/ -name "*.pose" -type f | wc -l) -eq 17205
+      #   msg: Mediapipe features for signsuisse have not been generated yet or are incomplete. Run the extraction.
+      # - sh: test $(find {{.DATA_DIR}}/srf/monolingual/mediapipe/ -name "*.pose" -type f | wc -l) -eq 37
+      #   msg: Mediapipe features for SRF have not been generated yet or are incomplete. Run the extraction.
       # - sh: test $(find {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/ -name "*.pose" -type f | wc -l) -eq 250
       #   msg: Mediapipe features for test have not been generated yet or are incomplete. Run the extraction.
-      # - sh: test $(find {{.WMTSLT23_DIR}}/test/dsgs-de/mediapipe/ -name "*.pose" -type f | wc -l) -eq 246
-      #   msg: Mediapipe features for test have not been generated yet or are incomplete. Run the extraction.
+      - sh: test $(find {{.DATA_DIR}}/test/dsgs-de/mediapipe/ -name "*.pose" -type f | wc -l) -eq 246
+        msg: Mediapipe features for test have not been generated yet or are incomplete. Run the extraction.
     cmds:
       # - cmd: |
       #         PYTHONPATH=$PYTHONPATH:{{.FAIRSEQ_ROOT}} \
